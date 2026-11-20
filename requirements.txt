@@ -1,0 +1,4 @@
+PyQt5==5.15.11
+numpy==2.4.6
+Pillow==13.0.0
+opencv-python-headless==5.1.0.95

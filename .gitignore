@@ -1,0 +1,22 @@
+# Runtime and downloaded dependencies are local build inputs, not source.
+vendor/
+.build-env/
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+releases/
+*.egg-info/
+*.lnk
+*.log
+*.tmp
+.env
+.env.*
+# Local evidence may contain private experiment images and paths.
+界面预览.png
+验收记录.md
+local/
+data/
+*.json
+!tests/fixtures/*.json
