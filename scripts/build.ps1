@@ -12,6 +12,16 @@ try {
     if ($changes) { throw '源码有未提交修改，请先提交，以保证安装包可追溯。' }
     $destination = Join-Path $projectRoot "releases/$version"
     if (Test-Path -LiteralPath $destination) { throw '此版本发布目录已存在，请升级版本号或归档旧构建后重试。' }
+    if ($Installer) {
+        if (-not $Iscc) {
+            $found = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($found) { $Iscc = $found.Source }
+            foreach ($candidate in @('C:/Program Files (x86)/Inno Setup 6/ISCC.exe','C:/Program Files/Inno Setup 6/ISCC.exe','C:/Program Files/Inno Setup 7/ISCC.exe','C:/Program Files (x86)/Inno Setup 7/ISCC.exe')) {
+                if (-not $Iscc -and (Test-Path -LiteralPath $candidate)) { $Iscc = $candidate }
+            }
+        }
+        if (-not $Iscc -or -not (Test-Path -LiteralPath $Iscc)) { throw '未找到 Inno Setup。先安装，或用 -Iscc 指定 ISCC.exe；此次未创建发布目录。' }
+    }
     & $Python -s -m PyInstaller --noconfirm packaging/optimizer.spec
     if ($LASTEXITCODE -ne 0) { throw '独立程序打包失败。' }
     $appFolder = Join-Path $projectRoot 'dist/BoneAnnotationOptimizer'
@@ -25,14 +35,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '独立 CLI 检查失败。' }
     Compress-Archive -LiteralPath $appFolder -DestinationPath (Join-Path $destination "BoneAnnotationOptimizer-$version-portable-win64.zip")
     if ($Installer) {
-        if (-not $Iscc) {
-            $found = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            if ($found) { $Iscc = $found.Source }
-            foreach ($candidate in @('C:/Program Files (x86)/Inno Setup 6/ISCC.exe','C:/Program Files/Inno Setup 6/ISCC.exe')) {
-                if (-not $Iscc -and (Test-Path -LiteralPath $candidate)) { $Iscc = $candidate }
-            }
-        }
-        if (-not $Iscc) { throw '已生成便携版；未找到 Inno Setup。使用 -Iscc 指定 ISCC.exe 后重新构建安装包。' }
         & $Iscc "/DAppVersion=$version" "/DReleaseDir=$destination" packaging/installer.iss
         if ($LASTEXITCODE -ne 0) { throw '安装包编译失败。' }
     }

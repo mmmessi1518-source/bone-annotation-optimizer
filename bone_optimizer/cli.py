@@ -2,11 +2,17 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 
 from .service import plan_files, process_file
 
 
 def main():
+    # Logs and JSON reports must also work on Windows machines whose system
+    # code page cannot represent Chinese (including clean English CI runners).
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     parser = argparse.ArgumentParser(description='骨样标注优化：输出可编辑 Labelme JSON，保留原稿。')
     parser.add_argument('input', type=Path)
     parser.add_argument('--output', required=True, type=Path, help='输出目录')

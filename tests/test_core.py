@@ -2,7 +2,9 @@ import base64
 from copy import deepcopy
 from io import BytesIO
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -29,6 +31,13 @@ def annotation(shapes, size=(64,48)):
 
 
 class LogicTests(unittest.TestCase):
+    def test_cli_help_on_english_windows_encoding(self):
+        environment = {**os.environ, 'PYTHONIOENCODING': 'cp1252'}
+        completed = subprocess.run([sys.executable, '-s', str(ROOT/'start.py'), '--cli', '--help'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode('utf-8',errors='replace'))
+        self.assertIn('骨样标注优化',completed.stdout.decode('utf-8'))
+
     def test_infer_both_directions_and_clip(self):
         for label, value, inferred in [('bone',1,2),('none_bone',2,1)]:
             a = annotation([box('specimen',10,10,50,35),box(label,0,0,20,20),box('ignore',45,30,55,40)])
