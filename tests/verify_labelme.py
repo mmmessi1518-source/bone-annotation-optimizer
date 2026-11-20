@@ -25,7 +25,7 @@ from bone_optimizer.service import process_file
 def main():
     app = QApplication.instance() or QApplication([])
     with tempfile.TemporaryDirectory(prefix='bone-optimizer-labelme-test-') as temp:
-        root = Path(temp)
+        root = Path(temp).resolve()
         QSettings.setDefaultFormat(QSettings.IniFormat)
         QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(root))
         config = root/'labelme.yaml'

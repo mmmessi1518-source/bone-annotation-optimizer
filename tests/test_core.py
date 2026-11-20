@@ -130,7 +130,7 @@ class LogicTests(unittest.TestCase):
 
     def test_paths_saving_and_source_protection(self):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp); (root/'photos').mkdir(); Image.new('RGB',(64,48)).save(root/'photos/photo.png')
+            root=Path(temp).resolve(); (root/'photos').mkdir(); Image.new('RGB',(64,48)).save(root/'photos/photo.png')
             manual=root/'annotations/manual/group'; manual.mkdir(parents=True)
             a=annotation([box('specimen',0,0,50,40),box('bone',10,10,20,20)])
             a.document['imagePath']='../../photos/photo.png'  # old path before manual folder was added
@@ -149,14 +149,14 @@ class LogicTests(unittest.TestCase):
 
     def test_plan_nested_and_collision(self):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp)
+            root=Path(temp).resolve()
             jobs=plan_files([root/'input/a/x.json',root/'input/b/x.json'],root/'out',root/'input')
             self.assertEqual(jobs[0][1],root/'out/a/x.json')
             with self.assertRaises(ValueError):plan_files([root/'a/x.json',root/'b/x.json'],root/'out')
 
     def test_exif_and_embedded_precedence(self):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp)
+            root=Path(temp).resolve()
             photo=Image.new('RGB',(20,30),'red'); exif=Image.Exif(); exif[274]=6
             photo.save(root/'photo.jpg',exif=exif)
             doc=annotation([box('specimen',0,0,29,19),box('bone',1,1,10,10)],(30,20)).document
@@ -174,7 +174,7 @@ class LogicTests(unittest.TestCase):
 
     def test_failed_write_leaves_no_partial_file(self):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp); dest=root/'test.json'
+            root=Path(temp).resolve(); dest=root/'test.json'
             with self.assertRaises(ValueError):write_new_json({'invalid':float('nan')},dest,root/'source.json')
             self.assertFalse(dest.exists())
             self.assertEqual(list(root.iterdir()),[])
