@@ -24,6 +24,7 @@ from .annotation_io import load_annotation, COLORS
 from .core import prepare, optimize, MODE_NAMES
 from .service import plan_files, export_result, process_file
 from .launchers import find_labelme_launcher, labelme_command
+from .thin_gaps import DEFAULT_THIN_GAP_WIDTH, MAX_THIN_GAP_WIDTH
 
 DEFAULT_INPUT = Path.home()
 
@@ -131,6 +132,7 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(400)
         self.timer.timeout.connect(self.preview_current)
         self.threshold.valueChanged.connect(self._schedule)
+        self.thin_gap_width.valueChanged.connect(self._schedule)
         self.mode.currentIndexChanged.connect(self._schedule)
         self.view_mode.currentIndexChanged.connect(self._schedule)
         for check in self.layers.values():
@@ -199,7 +201,15 @@ class MainWindow(QMainWindow):
         self.threshold.setSpecialValueText('关闭小区域过滤')
         self.threshold.setToolTip('8 连通；bone 与 none_bone 使用相同阈值。0=关闭。调节后始终从当前导入原稿重新计算。')
         rules.addWidget(self.threshold)
-        note = QLabel('默认 100 只是起点，可按预览调整。\n与大区域相连的细缝不会被此阈值删除。')
+        rules.addWidget(QLabel('推导细缝 → ignore（最大宽度）'))
+        self.thin_gap_width = QSpinBox()
+        self.thin_gap_width.setRange(0, MAX_THIN_GAP_WIDTH)
+        self.thin_gap_width.setValue(int(self.settings.value('thin_gap_width', DEFAULT_THIN_GAP_WIDTH)))
+        self.thin_gap_width.setSuffix(' 像素')
+        self.thin_gap_width.setSpecialValueText('关闭细缝过滤')
+        self.thin_gap_width.setToolTip('按原图宽度检测夹在不同类别之间的推导组织细缝，可处理连着主区域的细缝。0 表示关闭。')
+        rules.addWidget(self.thin_gap_width)
+        note = QLabel('面积处理独立小块。宽度处理推导细缝，可在优化预览中复核。')
         note.setWordWrap(True)
         note.setMinimumHeight(44)
         note.setObjectName('muted')
@@ -240,6 +250,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(QLabel('预览'))
         self.view_mode = QComboBox()
         self.view_mode.addItems(['优化预览', '原始标注', '原始照片', '改动高亮'])
+        self.view_mode.setToolTip('优化预览显示导出前的结果。原始标注显示导入文件中的类别。')
         toolbar.addWidget(self.view_mode)
         self.refresh_button = QPushButton('更新预览')
         self.refresh_button.clicked.connect(self.preview_current)
@@ -307,7 +318,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(bottom)
         self.statusBar().showMessage('就绪 · 输出全部为 Polygon；照片分辨率保持不变')
         self.controls = [self.add_files_button, self.add_folder_button, self.file_list,
-                         self.select_all, self.clear_button, self.mode, self.threshold,
+                         self.select_all, self.clear_button, self.mode, self.threshold, self.thin_gap_width,
                          self.output, self.output_button, self.image_root, self.image_button,
                          self.view_mode, self.full_resolution, self.refresh_button, self.export_one, self.export_batch] + list(self.layers.values())
 
@@ -434,6 +445,7 @@ class MainWindow(QMainWindow):
         if source is None or self.busy():
             return
         mode, threshold = self.mode.currentData(), self.threshold.value()
+        thin_gap_width = self.thin_gap_width.value()
         image_root = Path(self.image_root.text()) if self.image_root.text().strip() else None
         cached = self.prepared
         view = self.view_mode.currentText()
@@ -451,7 +463,7 @@ class MainWindow(QMainWindow):
             else:
                 prepared = prepare(load_annotation(source, image_root), mode)
                 prepared._signature = signature
-            result = optimize(prepared, threshold)
+            result = optimize(prepared, threshold, thin_gap_width=thin_gap_width)
             pixels = render_preview(result, view, layers, full_resolution)
             return result, pixels, round(time.perf_counter()-started, 2)
         self.run_work(work, self.preview_done)
@@ -464,11 +476,16 @@ class MainWindow(QMainWindow):
         small = r['small_regions_to_ignore']
         count = sum(v['components'] for v in small.values())
         area = sum(v['pixels'] for v in small.values())
-        self.summary.setText(f"{self.prepared.annotation.path.name}  ·  {r['mode_description']}\n"
-                             f'小独立区域：{count} 个 / {area:,} 像素转 ignore   ·   本次预览 {duration:.2f} 秒')
+        thin = r['thin_gaps_to_ignore']
+        self.summary.setText(f"{self.prepared.annotation.path.name}  ·  {self.view_mode.currentText()}  ·  {r['mode_description']}\n"
+                             f'转 ignore：小独立区域 {count} 个 / {area:,} 像素，推导细缝 {thin["pixels"]:,} 像素   ·   {duration:.2f} 秒')
         lines = [f"交叠 → ignore：{r['overlap_to_ignore_pixels']:,} 像素；空隙 → ignore：{r['gap_to_ignore_pixels']:,} 像素。",
                  f"裁掉外轮廓外的组织：{r['clipped_tissue_pixels']:,} 像素。",
                  '外轮廓外全部 background；内部 ignore 优先。', *r['warnings']]
+        if self.view_mode.currentText() == '原始标注':
+            lines.insert(0, '当前显示导入的标注。切换到「优化预览」可查看转 ignore 的效果。')
+        if r['thin_gap_width_original_pixels'] and thin['label'] is None:
+            lines.append('当前标注没有可确认的推导类别，细缝规则未应用。')
         self.details.setPlainText('\n'.join(lines))
 
     def output_jobs(self, sources):
@@ -481,6 +498,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue('output', text)
         self.settings.setValue('images', self.image_root.text())
         self.settings.setValue('threshold', self.threshold.value())
+        self.settings.setValue('thin_gap_width', self.thin_gap_width.value())
         return plan_files(sources, target, self.input_root)
 
     def export_current(self):
@@ -503,13 +521,15 @@ class MainWindow(QMainWindow):
             self.show_error(str(exc))
             return
         threshold, mode, images = self.threshold.value(), self.mode.currentData(), self.image_root.text().strip() or None
+        thin_gap_width = self.thin_gap_width.value()
         def work(progress):
             records = []
             for index, (source, destination) in enumerate(jobs):
                 if self.cancel_event.is_set():
                     break
                 try:
-                    path, report = process_file(source, destination, threshold, mode, images)
+                    path, report = process_file(source, destination, threshold, mode, images,
+                                                thin_gap_width=thin_gap_width)
                     record = {'ok': True, 'input': str(source), 'output': str(path), 'report': report}
                 except Exception as exc:
                     record = {'ok': False, 'input': str(source), 'error': str(exc)}
@@ -541,6 +561,7 @@ class MainWindow(QMainWindow):
         if good:
             last = good[-1]['report']
             self.details.appendPlainText(f"最近文件：{last['output_shapes']} 个可编辑图形，处理耗时 {last['total_seconds']:.2f} 秒。")
+            self.details.appendPlainText(f"推导细缝转 ignore：{last['thin_gaps_to_ignore']['pixels']:,} 像素。")
         self.details.appendPlainText('背景等有孔区域会拆成多个同标签多边形；分区接缝不是新的组织边界。')
 
     def open_labelme(self):

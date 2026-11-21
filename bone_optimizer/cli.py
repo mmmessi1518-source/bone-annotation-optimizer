@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 from .service import plan_files, process_file
+from .thin_gaps import DEFAULT_THIN_GAP_WIDTH, MAX_THIN_GAP_WIDTH
 
 
 def main():
@@ -17,12 +18,16 @@ def main():
     parser.add_argument('input', type=Path)
     parser.add_argument('--output', required=True, type=Path, help='输出目录')
     parser.add_argument('--threshold', type=int, default=100, help='原图像素面积，<= 阈值转 ignore；0 关闭')
+    parser.add_argument('--thin-gap-width', type=int, default=DEFAULT_THIN_GAP_WIDTH,
+                        metavar=f'0–{MAX_THIN_GAP_WIDTH}', help='推导细缝的最大原图像素宽度，默认 4，0 关闭')
     parser.add_argument('--mode', choices=['auto', 'bone', 'none_bone', 'explicit'], default='auto')
     parser.add_argument('--image-root', type=Path)
     parser.add_argument('--report', type=Path, help='可选汇总报告（不覆盖已有文件）')
     args = parser.parse_args()
     if args.threshold < 0:
         parser.error('threshold 不能为负数')
+    if not 0 <= args.thin_gap_width <= MAX_THIN_GAP_WIDTH:
+        parser.error(f'thin-gap-width 须为 0 至 {MAX_THIN_GAP_WIDTH}')
     root = args.input.resolve() if args.input.is_dir() else None
     if root and (args.output.resolve() == root or args.output.resolve().is_relative_to(root)):
         parser.error('批处理输出目录必须放在输入目录以外')
@@ -33,7 +38,8 @@ def main():
     reports, failures = [], 0
     for source, target in jobs:
         try:
-            written, details = process_file(source, target, args.threshold, args.mode, args.image_root)
+            written, details = process_file(source, target, args.threshold, args.mode, args.image_root,
+                                            thin_gap_width=args.thin_gap_width)
             report = {'input': str(source), 'output': str(written), 'status': 'success', **details}
         except Exception as exc:
             report = {'input': str(source), 'status': 'error', 'error': str(exc)}

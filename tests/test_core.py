@@ -31,6 +31,34 @@ def annotation(shapes, size=(64,48)):
 
 
 class LogicTests(unittest.TestCase):
+    def test_thin_inferred_strip_attached_to_main_bone_is_ignored(self):
+        source = annotation([box('specimen', 2, 2, 55, 40), box('none_bone', 2, 5, 45, 40)])
+        prepared = prepare(source)
+        old = optimize(prepared, 1, thin_gap_width=0)
+        narrow = optimize(prepared, 1, thin_gap_width=2)
+        cleaned = optimize(prepared, 1, thin_gap_width=3)
+        self.assertEqual(old.mask[3, 20], 1)
+        self.assertEqual(narrow.mask[3, 20], 1)
+        self.assertTrue(np.all(cleaned.mask[2:5, 20:40] == 255))
+        self.assertTrue(np.all(cleaned.mask[10:35, 48:54] == 1))
+        self.assertEqual(cleaned.mask[1, 20], 0)
+        self.assertEqual(cleaned.mask[5, 20], 2)
+        self.assertEqual(cleaned.report['small_regions_to_ignore']['bone']['pixels'], 0)
+        self.assertGreater(cleaned.report['thin_gaps_to_ignore']['pixels'], 0)
+        self.assertTrue(np.array_equal(old.mask, optimize(prepared, 1, thin_gap_width=0).mask))
+
+    def test_thin_gap_rule_preserves_explicit_tissue_and_reopened_result(self):
+        specimen = box('specimen', 2, 2, 55, 40)
+        nonbone = box('none_bone', 2, 5, 45, 40)
+        explicit_bone = box('bone', 2, 2, 55, 4)
+        explicit = optimize(prepare(annotation([specimen, nonbone, explicit_bone])), 0)
+        self.assertEqual(explicit.mask[3, 20], 1)
+        self.assertEqual(explicit.report['thin_gaps_to_ignore']['pixels'], 0)
+        inferred = optimize(prepare(annotation([specimen, nonbone])), 0)
+        document, _ = export_document(inferred, Path('out.json'))
+        reopened = annotation(document['shapes'])
+        self.assertTrue(np.array_equal(optimize(prepare(reopened), 0).mask, inferred.mask))
+
     def test_cli_help_on_english_windows_encoding(self):
         environment = {**os.environ, 'PYTHONIOENCODING': 'cp1252'}
         completed = subprocess.run([sys.executable, '-s', str(ROOT/'start.py'), '--cli', '--help'],

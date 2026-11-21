@@ -5,6 +5,7 @@ import time
 
 from .annotation_io import load_annotation, assert_source_unchanged, write_new_json
 from .core import prepare, optimize
+from .thin_gaps import DEFAULT_THIN_GAP_WIDTH
 from .vectorize import export_document
 
 
@@ -24,10 +25,11 @@ def export_result(result, destination):
     return written, report
 
 
-def process_file(source, destination, threshold=100, mode='auto', image_root=None):
+def process_file(source, destination, threshold=100, mode='auto', image_root=None, *,
+                 thin_gap_width=DEFAULT_THIN_GAP_WIDTH):
     start = time.perf_counter()
     annotation = load_annotation(Path(source), Path(image_root) if image_root else None)
-    result = optimize(prepare(annotation, mode), threshold)
+    result = optimize(prepare(annotation, mode), threshold, thin_gap_width=thin_gap_width)
     written, report = export_result(result, Path(destination))
     report['total_seconds'] = round(time.perf_counter()-start, 3)
     return written, report

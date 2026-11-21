@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from .annotation_io import Annotation, LABELS, NAMES, region_from_shapes
+from .thin_gaps import DEFAULT_THIN_GAP_WIDTH, MAX_THIN_GAP_WIDTH, thin_gap_roi
 
 cv2.setNumThreads(2)
 MODE_NAMES = {'auto': '自动判断', 'bone': '已画 bone，补出 none_bone',
@@ -23,6 +24,7 @@ class Prepared:
     areas: np.ndarray
     classes: np.ndarray
     original: np.ndarray
+    inferred_class: int | None
     report: dict
 
 
@@ -97,6 +99,23 @@ def prepare(annotation: Annotation, mode='auto') -> Prepared:
     base[bone] = 1
     base[nonbone] = 2
     base[ignore] = 255
+    inferred_class = None
+    if mode == 'none_bone' and not counts['bone']:
+        inferred_class = 1
+    elif mode == 'bone' and not counts['none_bone']:
+        inferred_class = 2
+    else:
+        # Legacy inputs include a computed Mask next to hand-drawn polygons.
+        # Use its provenance only after verifying it still equals the complement.
+        for value, other in ((1, 2), (2, 1)):
+            label_shapes = [shape for shape in shapes if shape['label'] == NAMES[value]]
+            if (label_shapes and counts[NAMES[other]]
+                    and all(shape.get('shape_type') == 'mask'
+                            and shape.get('generated_by') == 'specimen-mask-converter' for shape in label_shapes)
+                    and np.array_equal(regions[NAMES[value]] & ~ignore,
+                                       specimen & ~regions[NAMES[other]] & ~ignore)):
+                inferred_class = value
+                break
     component_ids = np.zeros(base.shape, dtype=np.int32)
     area_parts, class_parts = [np.array([0], dtype=np.int64)], [np.array([0], dtype=np.uint8)]
     offset = 0
@@ -118,21 +137,37 @@ def prepare(annotation: Annotation, mode='auto') -> Prepared:
               'overlap_to_ignore_pixels': int(conflicts.sum()), 'gap_to_ignore_pixels': int(gaps.sum()),
               'outside_ignore_to_background_pixels': int((regions['ignore'] & ~specimen).sum()),
               'warnings': warnings, 'prepare_seconds': round(time.perf_counter()-start, 3)}
-    return Prepared(annotation, base, specimen, component_ids, np.concatenate(area_parts), np.concatenate(class_parts), original, report)
+    return Prepared(annotation, base, specimen, component_ids, np.concatenate(area_parts), np.concatenate(class_parts), original, inferred_class, report)
 
 
-def optimize(prepared: Prepared, threshold=100) -> Result:
+def optimize(prepared: Prepared, threshold=100, *, thin_gap_width=DEFAULT_THIN_GAP_WIDTH) -> Result:
     start = time.perf_counter()
     if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0:
         raise ValueError('小区域阈值须为非负整数；0 表示关闭。')
+    if isinstance(thin_gap_width, bool) or not isinstance(thin_gap_width, int) or not 0 <= thin_gap_width <= MAX_THIN_GAP_WIDTH:
+        raise ValueError(f'细缝宽度须为 0 至 {MAX_THIN_GAP_WIDTH} 的整数；0 表示关闭。')
     small = (prepared.areas > 0) & (prepared.areas <= threshold)
     mask = prepared.base.copy()
     mask[small[prepared.components]] = 255
     changed = {NAMES[v]: {'components': int(np.count_nonzero(small & (prepared.classes == v))),
                          'pixels': int(prepared.areas[small & (prepared.classes == v)].sum())}
                for v in (1, 2)}
+    inferred = prepared.inferred_class
+    thin_pixels = 0
+    if thin_gap_width and inferred is not None:
+        # Detect against the original classes. Already filtered islands are
+        # counted once, and their new ignore pixels cannot create new gaps.
+        thin = thin_gap_roi(prepared.base, inferred, thin_gap_width)
+        if thin is not None:
+            region, gaps = thin
+            target = mask[region]
+            gaps &= target == inferred
+            thin_pixels = int(np.count_nonzero(gaps))
+            target[gaps] = 255
     report = {**prepared.report, 'threshold_original_pixels': threshold, 'connectivity': 8,
               'small_regions_to_ignore': changed,
+              'thin_gap_width_original_pixels': thin_gap_width,
+              'thin_gaps_to_ignore': {'label': NAMES.get(inferred), 'pixels': thin_pixels},
               'pixel_counts': {name: int(np.count_nonzero(mask == v)) for v, name in NAMES.items()},
               'filter_seconds': round(time.perf_counter()-start, 3)}
     return Result(prepared, mask, report)

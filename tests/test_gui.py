@@ -70,6 +70,11 @@ class GuiTests(unittest.TestCase):
         self.window.preview_current()
         self.wait()
         self.assertEqual(self.window.result.report['threshold_original_pixels'], 200)
+        self.window.thin_gap_width.setValue(2)
+        self.window.timer.stop()
+        self.window.preview_current()
+        self.wait()
+        self.assertEqual(self.window.result.report['thin_gap_width_original_pixels'], 2)
         invalid = self.manual/'invalid.json'
         invalid.write_text('{broken',encoding='utf-8')
         self.window.set_files([self.source,invalid], self.manual)
@@ -79,6 +84,8 @@ class GuiTests(unittest.TestCase):
         self.assertTrue((self.root/'优化版/sample.json').exists())
         self.assertFalse((self.root/'优化版/invalid.json').exists())
         self.assertIn('失败 1',self.window.summary.text())
+        saved = json.loads((self.root/'优化版/sample.json').read_text('utf-8'))
+        self.assertEqual(saved['bone_optimizer']['report']['thin_gap_width_original_pixels'], 2)
         self.assertTrue(self.window.open_button.isEnabled())
         self.assertEqual(self.source.read_text('utf-8')[0], '{')
 
